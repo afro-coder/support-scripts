@@ -14,6 +14,7 @@ RED='\033[0;31m'
 YELLOW='\033[0;33m'
 NC='\033[0m'
 
+echo -e "${YELLOW} v0.1  ${NC}"
 
 usage() { echo -e "Usage: $0 [-d data directory] [-s since=0s,1h,24h default 1h] [-o output_zip_dir] -n namespace(Gateway-Proxy) \nExtauth/Gloo defaults to gloo-system [-g Gloo components namespace]"  1>&2; exit 1; }
 
@@ -71,7 +72,6 @@ if [ -z "${GLOO_NAMESPACE}" ]; then
 
 fi
 
-echo -e "${YELLOW} v0.1  ${NC}"
 
 file_random=$(date +%Y%m%d_%s%H)
 
