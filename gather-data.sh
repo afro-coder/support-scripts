@@ -71,6 +71,7 @@ if [ -z "${GLOO_NAMESPACE}" ]; then
 
 fi
 
+echo -e "${YELLOW} v0.1  ${NC}"
 
 file_random=$(date +%Y%m%d_%s%H)
 
