@@ -14,11 +14,11 @@ RED='\033[0;31m'
 YELLOW='\033[0;33m'
 NC='\033[0m'
 
-echo -e "${YELLOW}Version v0.1${NC}"
+echo -e "${YELLOW}Version v0.2${NC}"
 
-usage() { echo -e "Usage: $0 [-d data directory] [-s since=0s,1h,24h default 1h] [-o output_zip_dir] -n namespace(Gateway-Proxy) \nExtauth/Gloo defaults to gloo-system [-g Gloo components namespace]"  1>&2; exit 1; }
+usage() { echo -e "Usage: $0 [-d data directory] [-s since=0s,1h,24h default 1h] [-o output_zip_dir] -n namespace(Gateway-Proxy) \nExtauth/Gloo defaults to gloo-system [-g Gloo components namespace] [-r don't run glooctl]"  1>&2; exit 1; }
 
-while getopts ":d:o:s:n:g" p; do
+while getopts ":d:o:s:n:g:r" p; do
     case "${p}" in
 	s) STIME=${OPTARG}
 	   ;;
@@ -33,6 +33,9 @@ while getopts ":d:o:s:n:g" p; do
 	    ;;
 	g)
 	    GLOO_NAMESPACE=${OPTARG}
+	    ;;
+	r) 
+	    GLOOCTL="yes"
 	    ;;
         *)
             usage
@@ -86,10 +89,6 @@ GLOO_METRICS_FILE="${DATA_DIR}/gloo_metrics_${file_random}.txt"
 GLOOCTL_CHECK_FILE="${DATA_DIR}/glooctl_check_${file_random}.txt"
 
 
-if ! command -v glooctl &> /dev/null; then
-	echo -e "${RED}glooctl isn't installed${NC}"
-	exit 1
-fi
 
 check_kubectl=$(command -v kubectl)
 check_oc=$(command -v oc)
@@ -141,40 +140,46 @@ EX_PODS=$($kubectl get pods -l "$1" -n "$GLOO_NAMESPACE" -o jsonpath={.items[*].
 ex_podnames=($EX_PODS)
 for i in "${ex_podnames[@]}"; do
 	echo -e "${YELLOW}Running kubectl port-forward -n ${GLOO_NAMESPACE} pods/${i} ${NC}"
-	kubectl port-forward -n "${GLOO_NAMESPACE}" pods/"${i}" 9091:9091 &> /dev/null  &
+	$kubectl port-forward -n "${GLOO_NAMESPACE}" pods/"${i}" 9091:9091 &> /dev/null  &
 	ex_PID=$!
-	sleep 2
+	sleep 5
 	curl -s localhost:9091/metrics -o "${DATA_DIR}/${i}_metrics_${file_random}.txt" &> /dev/null
-	sleep 1
+	sleep 3
 	kill $ex_PID
-	sleep 1
+	sleep 5
 	unset ex_PID
 
+	# Pull logs from the containers
+	echo -e "${YELLOW}Pulling logs from ${i} for the past ${STIME} ${NC}"
+	$kubectl logs --since=${STIME} -l "$1" -n "${GLOO_NAMESPACE}"  --prefix > "${DATA_DIR}/${i}_logs_${file_random}.txt"
 done
 
 }
 
 # extauth
 
-echo -e "\n${YELLOW}Curling extauth metrics${NC}"
+echo -e "\n${YELLOW}Get extauth metrics${NC}"
 loop_pods gloo=extauth
 
-echo -e "${YELLOW}Get Extauth Logs since ${STIME} ${NC}"
-$kubectl logs --since=${STIME} -l gloo=extauth -n ${GLOO_NAMESPACE}  --prefix > "${DATA_DIR}/extauth_logs_${file_random}.txt"
+# Disable Logs from Extauth and switch to looping over pods.
+
+#echo -e "${YELLOW}Get Extauth Logs since ${STIME} ${NC}"
+#$kubectl logs --since=${STIME} -l gloo=extauth -n "${GLOO_NAMESPACE}"  --prefix > "${DATA_DIR}/extauth_logs_${file_random}.txt"
 #$kubectl port-forward deployment/${DEPLOYMENT_EXTAUTH} -n ${GLOO_NAMESPACE} 9091:9091 &> /dev/null &
 #extauth_PID=$!
 
 sleep 1
 
 # gloo pod
-echo -e "\n${YELLOW}Curling gloo metrics${NC}"
+echo -e "\n${YELLOW}Get gloo metrics${NC}"
 
 loop_pods gloo=gloo
+
 #$kubectl port-forward deployment/${DEPLOYMENT_GLOO} -n ${GLOO_NAMESPACE} 9091:9091 &> /dev/null &
 #gloo_PID=$!
 
-echo -e "${YELLOW}Get Gloo Logs since ${STIME} ${NC}"
-$kubectl logs --since=${STIME} -l gloo=gloo -n ${GLOO_NAMESPACE}  --prefix > "${DATA_DIR}/gloo_logs_${file_random}.txt"
+#echo -e "${YELLOW}Get Gloo Logs since ${STIME} ${NC}"
+#$kubectl logs --since=${STIME} -l gloo=gloo -n ${GLOO_NAMESPACE}  --prefix > "${DATA_DIR}/gloo_logs_${file_random}.txt"
 #sleep 1
 
 #curl -s localhost:9091/metrics -o "$GLOO_METRICS_FILE"
@@ -214,8 +219,17 @@ kubectl get pods -l "gloo=gloo" -n "$GLOO_NAMESPACE" -o jsonpath='{range .items[
 
 kubectl get upstreams -A -o yaml>> "${DATA_DIR}/upstreams_${file_random}.txt"
 
+if [ -z "${GLOOCTL}" ]; then
+
+if ! command -v glooctl &> /dev/null; then
+	echo -e "${RED}glooctl isn't installed${NC}"
+	exit 1
+fi
+
 echo -e "\n${YELLOW}Running Glooctl check${NC}"
 glooctl check &> "$GLOOCTL_CHECK_FILE" 
+
+fi
 
 echo -e "\n${YELLOW}Zipping tar -czvf ${ZIP_DIR}/gloo_${file_random}.tar.gz $DATA_DIR ${NC}"
 tar -czvf "${ZIP_DIR}/gloo_${file_random}.tar.gz" "$DATA_DIR" &> /dev/null
