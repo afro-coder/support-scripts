@@ -14,7 +14,7 @@ RED='\033[0;31m'
 YELLOW='\033[0;33m'
 NC='\033[0m'
 
-VERSION="0.3"
+VERSION="0.4"
 
 echo -e "${YELLOW}Version $VERSION ${NC}"
 
@@ -106,10 +106,10 @@ check_glooctl=$(command -v glooctl)
 
 if command -v kubectl > /dev/null; then
 	kubectl=$check_kubectl
-	killall kubectl
+	killall kubectl &> /dev/null
 elif command -v oc > /dev/null; then
 	kubectl=$check_oc
-	killall oc
+	killall oc &> /dev/null
 else 
 	echo -e "${RED}Kubectl or oc isn't found exiting...${NC}"
 	exit 2
@@ -163,7 +163,7 @@ for i in "${ex_podnames[@]}"; do
 
 	# Pull logs from the containers
 	echo -e "${YELLOW}Pulling logs from ${i} for the past ${STIME} ${NC}"
-	$kubectl logs --since=${STIME} pods/"${i}" -n "$2"  --prefix > "${DATA_DIR}/${i}_logs_${file_random}.txt"
+	$kubectl logs --all-containers --since=${STIME} pods/"${i}" -n "$2"  --prefix > "${DATA_DIR}/${i}_logs_${file_random}.txt"
 done
 
 }
