@@ -14,12 +14,14 @@ RED='\033[0;31m'
 YELLOW='\033[0;33m'
 NC='\033[0m'
 
-echo -e "${YELLOW}Version v0.2${NC}"
+VERSION="0.3"
 
-usage() { echo -e "Usage: $0 [-d data directory] [-s since=0s,1h,24h default 1h] [-o output_zip_dir] -n namespace(Gateway-Proxy) \nExtauth/Gloo defaults to gloo-system [-g Gloo components namespace] [-r don't run glooctl]"  1>&2; exit 1; }
+echo -e "${YELLOW}Version $VERSION ${NC}"
 
-while getopts ":d:o:s:n:g:r" p; do
-    case "${p}" in
+usage() { echo -e "Usage: $0 [-d data directory] [-s since=0s,1h,24h default 1h] [-o output_zip_dir] -n namespace(Gateway-Proxy) \nExtauth/Gloo defaults to gloo-system [-g Gloo components namespace] [-p Portal Namespace] [-r don't run glooctl]"  1>&2; exit 1; }
+
+while getopts ":d:o:s:n:g:r:p" t; do
+    case "${t}" in
 	s) STIME=${OPTARG}
 	   ;;
 	d)
@@ -34,8 +36,11 @@ while getopts ":d:o:s:n:g:r" p; do
 	g)
 	    GLOO_NAMESPACE=${OPTARG}
 	    ;;
+
+	p)  PORTAL_NAMESPACE=${OPTARG}
+	    ;;
 	r) 
-	    GLOOCTL="yes"
+	    GLOOCTL="no"
 	    ;;
         *)
             usage
@@ -75,6 +80,11 @@ if [ -z "${GLOO_NAMESPACE}" ]; then
 
 fi
 
+if [ -z "${PORTAL_NAMESPACE}" ]; then
+	PORTAL_NAMESPACE="gloo-portal"
+	echo -e "${YELLOW}Using ${PORTAL_NAMESPACE} for Portal Components${NC}"
+
+fi
 
 file_random=$(date +%Y%m%d_%s%H)
 
@@ -94,10 +104,10 @@ check_kubectl=$(command -v kubectl)
 check_oc=$(command -v oc)
 check_glooctl=$(command -v glooctl)
 
-if command -v kubectl; then
+if command -v kubectl > /dev/null; then
 	kubectl=$check_kubectl
 	killall kubectl
-elif command -v oc; then
+elif command -v oc > /dev/null; then
 	kubectl=$check_oc
 	killall oc
 else 
@@ -132,26 +142,28 @@ sleep 1
 echo -e "${YELLOW}Storing data in $DATA_DIR${NC}"
 
 
-# loop_pods gloo=extauth
+# loop_pods gloo=extauth gloo-system
 # Doesn't support gateway_proxy
 
 loop_pods () {
-EX_PODS=$($kubectl get pods -l "$1" -n "$GLOO_NAMESPACE" -o jsonpath={.items[*].metadata.name})
+EX_PODS=$($kubectl get pods -l "$1" -n "$2" -o jsonpath={.items[*].metadata.name})
 ex_podnames=($EX_PODS)
 for i in "${ex_podnames[@]}"; do
-	echo -e "${YELLOW}Running kubectl port-forward -n ${GLOO_NAMESPACE} pods/${i} ${NC}"
-	$kubectl port-forward -n "${GLOO_NAMESPACE}" pods/"${i}" 9091:9091 &> /dev/null  &
+	echo -e "${YELLOW}Running kubectl port-forward -n $2 pods/${i} ${NC}"
+	$kubectl port-forward -n "$2" pods/"${i}" 9091:9091 &> /dev/null  &
 	ex_PID=$!
 	sleep 5
+
+	echo -e "${YELLOW}Gathering metrics from $i ${NC}"
 	curl -s localhost:9091/metrics -o "${DATA_DIR}/${i}_metrics_${file_random}.txt" &> /dev/null
-	sleep 3
-	kill $ex_PID
+	
 	sleep 5
+	kill $ex_PID
 	unset ex_PID
 
 	# Pull logs from the containers
 	echo -e "${YELLOW}Pulling logs from ${i} for the past ${STIME} ${NC}"
-	$kubectl logs --since=${STIME} -l "$1" -n "${GLOO_NAMESPACE}"  --prefix > "${DATA_DIR}/${i}_logs_${file_random}.txt"
+	$kubectl logs --since=${STIME} pods/"${i}" -n "$2"  --prefix > "${DATA_DIR}/${i}_logs_${file_random}.txt"
 done
 
 }
@@ -159,7 +171,8 @@ done
 # extauth
 
 echo -e "\n${YELLOW}Get extauth metrics${NC}"
-loop_pods gloo=extauth
+loop_pods gloo=extauth "$GLOO_NAMESPACE"
+
 
 # Disable Logs from Extauth and switch to looping over pods.
 
@@ -173,7 +186,19 @@ sleep 1
 # gloo pod
 echo -e "\n${YELLOW}Get gloo metrics${NC}"
 
-loop_pods gloo=gloo
+loop_pods gloo=gloo "$GLOO_NAMESPACE"
+
+
+# Portal Pod
+
+echo -e "\n${YELLOW}Get gloo portal metrics${NC}"
+loop_pods app=gloo-portal "$PORTAL_NAMESPACE"
+
+# Portal Admin Pod
+
+echo -e "\n${YELLOW}Get gloo portal admin metrics${NC}"
+loop_pods app=gloo-portal-admin-server "$PORTAL_NAMESPACE"
+
 
 #$kubectl port-forward deployment/${DEPLOYMENT_GLOO} -n ${GLOO_NAMESPACE} 9091:9091 &> /dev/null &
 #gloo_PID=$!
