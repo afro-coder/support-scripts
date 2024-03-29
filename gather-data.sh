@@ -14,7 +14,7 @@ RED='\033[0;31m'
 YELLOW='\033[0;33m'
 NC='\033[0m'
 
-VERSION="0.4"
+VERSION="0.5"
 
 echo -e "${YELLOW}Version $VERSION ${NC}"
 
@@ -242,7 +242,15 @@ kubectl get pods -l "gloo=gateway-proxy" -n "$NAMESPACE" -o jsonpath='{range .it
 kubectl get pods -l "gloo=extauth" -n "$GLOO_NAMESPACE" -o jsonpath='{range .items[*]}{@.metadata.name}{" "}{@.status.podIPs}{"\n"}{end}' >> "${DATA_DIR}/pod_info_${file_random}.txt"
 kubectl get pods -l "gloo=gloo" -n "$GLOO_NAMESPACE" -o jsonpath='{range .items[*]}{@.metadata.name}{" "}{@.status.podIPs}{"\n"}{end}' >> "${DATA_DIR}/pod_info_${file_random}.txt"
 
+
+kubectl get pods -l "app=gloo-portal" -n "$PORTAL_NAMESPACE" -o jsonpath='{range .items[*]}{@.metadata.name}{" "}{@.status.podIPs}{"\n"}{end}' >> "${DATA_DIR}/pod_info_${file_random}.txt"
+
+kubectl get pods -l "app=gloo-portal-admin-server" -n "$PORTAL_NAMESPACE" -o jsonpath='{range .items[*]}{@.metadata.name}{" "}{@.status.podIPs}{"\n"}{end}' >> "${DATA_DIR}/pod_info_${file_random}.txt"
+
 kubectl get upstreams -A -o yaml>> "${DATA_DIR}/upstreams_${file_random}.txt"
+kubectl get vs -A -o yaml>> "${DATA_DIR}/virtualservice_${file_random}.txt"
+kubectl get routetables -A -o yaml>> "${DATA_DIR}/routetables_${file_random}.txt"
+kubectl get routes -A -o yaml>> "${DATA_DIR}/routes_${file_random}.txt"
 
 if [ -z "${GLOOCTL}" ]; then
 
