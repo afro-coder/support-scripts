@@ -9,18 +9,18 @@
 
 #BASE_DIR="/tmp"
 
+
 GREEN='\033[0;32m'
 RED='\033[0;31m'
 YELLOW='\033[0;33m'
 NC='\033[0m'
 
-VERSION="0.5"
-
-echo -e "${YELLOW}Version $VERSION ${NC}"
+VERSION="0.6"
+#GLOOCTL="true"
 
 usage() { echo -e "Usage: $0 [-d data directory] [-s since=0s,1h,24h default 1h] [-o output_zip_dir] -n namespace(Gateway-Proxy) \nExtauth/Gloo defaults to gloo-system [-g Gloo components namespace] [-p Portal Namespace] [-r don't run glooctl]"  1>&2; exit 1; }
 
-while getopts ":d:o:s:n:g:r:p" t; do
+while getopts ":d:o:s:n:g:rp:" t; do
     case "${t}" in
 	s) STIME=${OPTARG}
 	   ;;
@@ -37,10 +37,11 @@ while getopts ":d:o:s:n:g:r:p" t; do
 	    GLOO_NAMESPACE=${OPTARG}
 	    ;;
 
-	p)  PORTAL_NAMESPACE=${OPTARG}
+        r) 
+	    GLOOCTL='false'
 	    ;;
-	r) 
-	    GLOOCTL="no"
+	p)  
+	    PORTAL_NAMESPACE=${OPTARG}
 	    ;;
         *)
             usage
@@ -49,6 +50,17 @@ while getopts ":d:o:s:n:g:r:p" t; do
 done
 
 shift $((OPTIND-1))
+
+#BASE_DIR="/tmp"
+
+
+#if [ "$DATA_DIR" != "$PWD" ] ;then
+#	echo -e "${RED}This isn't the data directory${NC}"
+#	exit 1
+#fi
+sleep 1
+
+
 
 if [ -z "${NAMESPACE}" ]; then
 	echo -e "\n${RED}No gateway-proxy namespace provided${NC}\n"
@@ -86,13 +98,23 @@ if [ -z "${PORTAL_NAMESPACE}" ]; then
 
 fi
 
-file_random=$(date +%Y%m%d_%s%H)
-
-
-DATA_DIR="${BASE_DIR}/gloo-${file_random}"
 DEPLOYMENT_EXTAUTH="extauth"
 DEPLOYMENT_GLOO="gloo"
 
+
+file_random=$(date +%Y%m%d_%s%H)
+
+DATA_DIR="${BASE_DIR}/gloo-${file_random}"
+
+mkdir -p "$DATA_DIR"
+cd "$DATA_DIR" || exit
+
+
+LOG_FILE="${DATA_DIR}/logfile_${file_random}"
+
+exec > >(tee ${LOG_FILE}) 2>&1
+
+echo -e "${YELLOW}Version $VERSION ${NC}"
 
 EXTAUTH_METRICS_FILE="${DATA_DIR}/extauth_metrics_${file_random}.txt"
 GLOO_METRICS_FILE="${DATA_DIR}/gloo_metrics_${file_random}.txt"
@@ -130,14 +152,6 @@ echo "Gathering Data for $($kubectl config current-context)"
 
 # Store it in a data_dir, zip it at the end.
 
-mkdir -p "$DATA_DIR"
-cd "$DATA_DIR" || exit
-
-if [ "$DATA_DIR" != "$PWD" ] ;then
-	echo -e "${RED}This isn't the data directory${NC}"
-	exit 1
-fi
-sleep 1
 
 echo -e "${YELLOW}Storing data in $DATA_DIR${NC}"
 
@@ -226,18 +240,23 @@ for i in "${pod_names[@]}"; do
 	kubectl port-forward -n "${NAMESPACE}" pods/"${i}" 19000:19000 &> /dev/null  &
 	gw_PID=$!
 	sleep 2
+	echo -e "${YELLOW}Metrics for $i ${NC}"
 	curl -s localhost:19000/stats -o "${DATA_DIR}/${i}_metrics_${file_random}.txt" &> /dev/null
+	curl -s localhost:19000/stats/prometheus -o "${DATA_DIR}/${i}_prom_metrics_${file_random}.txt" &> /dev/null
+	
+	echo -e "${YELLOW}config_dump for $i ${NC}"
 	curl -s -X POST "localhost:19000/config_dump?include_eds" > "${DATA_DIR}/${i}_config_dump_${file_random}.txt"
 	# Don't log this it's on a PV and can be in GB's
 	# echo -e "${YELLOW} Get ${i} Logs ${NC}"
-	kubectl logs pods/"${i}" -n "${NAMESPACE}"  --prefix >  "${DATA_DIR}/${i}_access_logs_${file_random}.txt"
+	echo -e "${YELLOW} Logs for $i ${NC}"
+	kubectl logs pods/"${i}" -n "${NAMESPACE}" --since=${STIME}  --prefix >  "${DATA_DIR}/${i}_access_logs_${file_random}.txt"
 	sleep 1
 	kill $gw_PID
 	unset gw_PID
 
 done
 
-echo -e "\n${YELLOW}Gathering Extauth, Gloo, Gateway-proxy Pod names and IP and upstreams"
+echo -e "\n${YELLOW}Gathering Extauth, Gloo, Gateway-proxy Pod names and IP and upstreams and portal CR's"
 kubectl get pods -l "gloo=gateway-proxy" -n "$NAMESPACE" -o jsonpath='{range .items[*]}{@.metadata.name}{" "}{@.status.podIPs}{"\n"}{end}' >> "${DATA_DIR}/pod_info_${file_random}.txt"
 kubectl get pods -l "gloo=extauth" -n "$GLOO_NAMESPACE" -o jsonpath='{range .items[*]}{@.metadata.name}{" "}{@.status.podIPs}{"\n"}{end}' >> "${DATA_DIR}/pod_info_${file_random}.txt"
 kubectl get pods -l "gloo=gloo" -n "$GLOO_NAMESPACE" -o jsonpath='{range .items[*]}{@.metadata.name}{" "}{@.status.podIPs}{"\n"}{end}' >> "${DATA_DIR}/pod_info_${file_random}.txt"
@@ -247,10 +266,14 @@ kubectl get pods -l "app=gloo-portal" -n "$PORTAL_NAMESPACE" -o jsonpath='{range
 
 kubectl get pods -l "app=gloo-portal-admin-server" -n "$PORTAL_NAMESPACE" -o jsonpath='{range .items[*]}{@.metadata.name}{" "}{@.status.podIPs}{"\n"}{end}' >> "${DATA_DIR}/pod_info_${file_random}.txt"
 
-kubectl get upstreams -A -o yaml>> "${DATA_DIR}/upstreams_${file_random}.txt"
-kubectl get vs -A -o yaml>> "${DATA_DIR}/virtualservice_${file_random}.txt"
-kubectl get routetables -A -o yaml>> "${DATA_DIR}/routetables_${file_random}.txt"
-kubectl get routes -A -o yaml>> "${DATA_DIR}/routes_${file_random}.txt"
+kubectl get upstreams.gloo.solo.io -A -o yaml>> "${DATA_DIR}/upstreams_${file_random}.txt"
+kubectl get virtualservices.gateway.solo.io  -A -o yaml>> "${DATA_DIR}/virtualservice_${file_random}.txt"
+kubectl get routetables.gateway.solo.io -A -o yaml>> "${DATA_DIR}/routetables_${file_random}.txt"
+kubectl get routes.portal.gloo.solo.io -A -o yaml>> "${DATA_DIR}/routes_${file_random}.txt"
+kubectl get environments.portal.gloo.solo.io -A -o yaml >> "${DATA_DIR}/environment_${file_random}.txt"
+kubectl get apiproducts.portal.gloo.solo.io -A -o yaml >> "${DATA_DIR}/apiproducts_${file_random}.txt"
+kubectl get apidocs.portal.gloo.solo.io -A -o yaml >> "${DATA_DIR}/apidocs_${file_random}.txt"
+kubectl get routes -A -o yaml>> "${DATA_DIR}/okd_routes_${file_random}.txt"
 
 if [ -z "${GLOOCTL}" ]; then
 
