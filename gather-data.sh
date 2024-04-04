@@ -15,7 +15,7 @@ RED='\033[0;31m'
 YELLOW='\033[0;33m'
 NC='\033[0m'
 
-VERSION="0.6"
+VERSION="0.7"
 #GLOOCTL="true"
 
 usage() { echo -e "Usage: $0 [-d data directory] [-s since=0s,1h,24h default 1h] [-o output_zip_dir] -n namespace(Gateway-Proxy) \nExtauth/Gloo defaults to gloo-system [-g Gloo components namespace] [-p Portal Namespace] [-r don't run glooctl]"  1>&2; exit 1; }
